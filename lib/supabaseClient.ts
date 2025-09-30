@@ -21,7 +21,7 @@ export interface User {
   id: string
   email: string
   name: string
-  password_hash: string
+  password_hash?: string
   created_at: string
   approved: boolean
 }
@@ -88,7 +88,7 @@ export class UserService {
   static async verifyPassword(email: string, password: string): Promise<User | null> {
     try {
       const user = await this.getUserByEmail(email)
-      if (!user) {
+      if (!user || !user.password_hash) {
         return null
       }
 

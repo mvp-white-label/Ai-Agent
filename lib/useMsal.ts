@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
+import { PublicClientApplication } from '@azure/msal-browser'
 
 interface MsalState {
-  msalInstance: any
+  msalInstance: PublicClientApplication | null
   msalConfig: any
   loginRequest: any
   isLoading: boolean
@@ -24,11 +25,7 @@ export function useMsal(): MsalState {
 
     const initializeMsal = async () => {
       try {
-        console.log('Initializing MSAL 1.0...')
-        
-        // Dynamic import of MSAL
-        const { UserAgentApplication } = await import('@azure/msal')
-        console.log('MSAL imported successfully')
+        console.log('Initializing MSAL 2.0...')
         
         // Dynamic import of config
         const { msalConfig, loginRequest } = await import('./msalConfig')
@@ -37,8 +34,9 @@ export function useMsal(): MsalState {
         // Create MSAL instance with error handling
         let msal
         try {
-          msal = new UserAgentApplication(msalConfig)
-          console.log('MSAL instance created successfully')
+          msal = new PublicClientApplication(msalConfig)
+          await msal.initialize()
+          console.log('MSAL instance created and initialized successfully')
         } catch (msalError) {
           console.error('Error creating MSAL instance:', msalError)
           throw new Error(`Failed to create MSAL instance: ${msalError instanceof Error ? msalError.message : 'Unknown error'}`)

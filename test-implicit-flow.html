@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Implicit Flow</title>
+</head>
+<body>
+    <h1>Test Azure AD Implicit Flow</h1>
+    <p>Click the button below to test if Implicit Grant is enabled in your Azure AD app:</p>
+    
+    <button onclick="testImplicitFlow()">Test Implicit Flow</button>
+    
+    <div id="result"></div>
+
+    <script>
+        function testImplicitFlow() {
+            // Replace with your actual values
+            const clientId = 'YOUR_AZURE_CLIENT_ID';
+            const tenantId = 'YOUR_AZURE_TENANT_ID';
+            const redirectUri = 'http://localhost:3000/auth/redirect';
+            
+            // Build the authorization URL for implicit flow
+            const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?` +
+                `client_id=${clientId}&` +
+                `response_type=id_token token&` +
+                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                `scope=openid profile email User.Read&` +
+                `response_mode=fragment&` +
+                `state=test123&` +
+                `nonce=test456`;
+            
+            console.log('Authorization URL:', authUrl);
+            
+            // Open the URL
+            window.open(authUrl, '_blank');
+            
+            document.getElementById('result').innerHTML = `
+                <h3>Test URL Generated:</h3>
+                <p><a href="${authUrl}" target="_blank">Click here to test</a></p>
+                <p><strong>Expected result:</strong> You should see tokens in the URL hash (#access_token=...&id_token=...)</p>
+                <p><strong>If you see a code parameter instead:</strong> Implicit Grant is not enabled in Azure AD</p>
+            `;
+        }
+    </script>
+</body>
+</html>
+
+
+

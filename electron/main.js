@@ -10,8 +10,8 @@ let mainWindow
 function createWindow() {
   // Create the browser window
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1600,
+    height: 1000,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -68,7 +68,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl)
     
-    if (parsedUrl.origin !== 'http://localhost:3000' && parsedUrl.origin !== 'file://') {
+    if (parsedUrl.origin !== 'http://localhost:3001' && parsedUrl.origin !== 'file://') {
       event.preventDefault()
       require('electron').shell.openExternal(navigationUrl)
     }

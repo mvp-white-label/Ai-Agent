@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import TrialInterviewModal from '../../components/TrialInterviewModal'
+import OutOfCreditsModal from '../../components/OutOfCreditsModal'
+import ResumeModal from '../../components/ResumeModal'
+import CreditStatus from '../../components/CreditStatus'
 
 interface User {
   id: string
@@ -11,13 +14,24 @@ interface User {
   approved: boolean
 }
 
+interface Credits {
+  total: number
+  used: number
+  available: number
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null)
+  const [credits, setCredits] = useState<Credits | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showProfile, setShowProfile] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showTrialModal, setShowTrialModal] = useState(false)
+  const [showCreditsModal, setShowCreditsModal] = useState(false)
+  const [activeSession, setActiveSession] = useState<any>(null)
+  const [showResumeModal, setShowResumeModal] = useState(false)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
   const router = useRouter()
 
   // Close profile dropdown when clicking outside
@@ -59,6 +73,10 @@ export default function DashboardPage() {
 
         if (data.valid && data.user) {
           setUser(data.user)
+          // Check for active sessions
+          checkActiveSessions(data.user.id)
+          // Fetch user credits
+          fetchCredits()
         } else {
           localStorage.removeItem('session')
           router.push('/login/')
@@ -95,6 +113,12 @@ export default function DashboardPage() {
     try {
       console.log('Starting trial interview for:', { company, jobDescription })
       
+      // Get session token from localStorage
+      const sessionToken = localStorage.getItem('session')
+      if (!sessionToken) {
+        throw new Error('No session token found')
+      }
+      
       // Create trial session in database
       const response = await fetch('/api/sessions/create', {
         method: 'POST',
@@ -102,7 +126,7 @@ export default function DashboardPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          userId: user?.id,
+          sessionToken: sessionToken, // Include session token for authentication
           sessionType: 'trial',
           company: company,
           position: jobDescription,
@@ -128,6 +152,158 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Error starting trial interview:', error)
       setError('Failed to start trial interview')
+    }
+  }
+
+  const checkActiveSessions = async (userId: string) => {
+    try {
+      const response = await fetch(`/api/sessions/simple?userId=${userId}`)
+      const data = await response.json()
+      
+      if (data.success && data.sessions) {
+        const active = data.sessions.find((session: any) => session.status === 'active')
+        if (active) {
+          setActiveSession(active)
+          console.log('Found active session:', active)
+        }
+      }
+    } catch (error) {
+      console.error('Error checking active sessions:', error)
+    }
+  }
+
+  const fetchCredits = async () => {
+    try {
+      // Get session token from localStorage
+      const sessionToken = localStorage.getItem('session')
+      if (!sessionToken) {
+        console.error('No session token found for credits fetch')
+        return
+      }
+
+      const response = await fetch('/api/credits/check', {
+        method: 'POST', // Change to POST to send session token in body
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionToken: sessionToken
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setCredits(data.credits)
+      } else {
+        console.error('Error fetching credits:', data.error)
+      }
+    } catch (error) {
+      console.error('Error fetching credits:', error)
+    }
+  }
+
+  const handleStartSession = async () => {
+    if (!user) return
+
+    // For now, show credits modal since credit system is not set up
+    setShowCreditsModal(true)
+    return
+
+    // TODO: Re-enable this when credit system is set up
+    /*
+    // Check if user has credits
+    if (!credits || credits.available < 1) {
+      setShowCreditsModal(true)
+      return
+    }
+
+    try {
+      setIsCreatingSession(true)
+      
+      // Create full interview session
+      const response = await fetch('/api/sessions/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionType: 'full',
+          company: 'General Interview',
+          position: 'Software Engineer',
+          durationMinutes: 60,
+          language: 'English',
+          aiModel: 'Gemini 2.0 Flash',
+          extraContext: '',
+          resumeId: null
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        if (errorData.error === 'Insufficient credits') {
+          setShowCreditsModal(true)
+          return
+        }
+        throw new Error(errorData.message || 'Failed to create interview session')
+      }
+
+      const sessionData = await response.json()
+      console.log('Full interview session created:', sessionData)
+      
+      // Redirect to interview sessions page
+      router.push('/interview-sessions')
+      
+    } catch (error) {
+      console.error('Error starting interview session:', error)
+      setError('Failed to start interview session')
+    } finally {
+      setIsCreatingSession(false)
+    }
+    */
+  }
+
+  const handleGetCredits = () => {
+    console.log('Redirecting to get credits')
+    setShowCreditsModal(false)
+    router.push('/billing')
+  }
+
+  const handleResumeSession = () => {
+    if (activeSession) {
+      setShowResumeModal(true)
+    }
+  }
+
+  const handleResumeInterview = async (stream: MediaStream, platform: string, sessionData: any) => {
+    try {
+      console.log('Resuming interview with session data:', sessionData)
+      
+      // Update session status to active if it's not already
+      const response = await fetch('/api/sessions/update-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId: activeSession.id,
+          userId: user?.id,
+          status: 'active'
+        }),
+      })
+
+      if (response.ok) {
+        console.log('Session status updated, redirecting to resume page...')
+        
+        // Close the resume modal
+        setShowResumeModal(false)
+        
+        // Redirect to the resume page with the session ID
+        router.push(`/resume?sessionId=${activeSession.id}`)
+      }
+    } catch (error) {
+      console.error('Error resuming session:', error)
+      setError('Failed to resume interview session')
     }
   }
 
@@ -226,16 +402,26 @@ export default function DashboardPage() {
         {/* Interview Credits Card */}
         <div className="mt-8 mx-4">
           <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
-            <div className="flex items-center space-x-2 mb-3">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-              <h3 className="font-semibold text-gray-900">Interview Credits</h3>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                <h3 className="font-semibold text-gray-900">Interview Credits</h3>
+              </div>
+              <CreditStatus 
+                userId={user?.id || ''} 
+                onCreditsChange={setCredits}
+                showDetails={true}
+              />
             </div>
             <p className="text-sm text-gray-600 mb-4">
               Start a <span className="font-semibold">10min</span> free trial session or buy credits for full-length interview sessions.
             </p>
-            <button className="w-full bg-gradient-to-r from-blue-600 to-green-500 text-white py-2 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-green-600 transition-all duration-200 shadow-md">
+            <button 
+              onClick={() => router.push('/billing')}
+              className="w-full bg-gradient-to-r from-blue-600 to-green-500 text-white py-2 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-green-600 transition-all duration-200 shadow-md"
+            >
               Get Credits
             </button>
           </div>
@@ -262,14 +448,36 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-bold text-gray-900">Home</h1>
               <div className="flex items-center space-x-4">
+                {activeSession && (
+                  <button 
+                    onClick={handleResumeSession}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8m-9-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Resume Interview</span>
+                  </button>
+                )}
                 <button 
                   onClick={() => setShowTrialModal(true)}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   Start Trial Session
                 </button>
-                <button className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">
-                  Start Session
+                <button 
+                  onClick={handleStartSession}
+                  disabled={isCreatingSession}
+                  className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {isCreatingSession ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <span>Start Interview</span>
+                  )}
                 </button>
                 <div className="relative profile-dropdown">
                   <button
@@ -419,7 +627,10 @@ export default function DashboardPage() {
                   <p className="text-sm text-gray-600 mb-4">
                     Buy credits to use for the real interview. No subscription!
                   </p>
-                  <button className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                  <button 
+                    onClick={() => router.push('/billing')}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
                     Get Credits
                   </button>
                 </div>
@@ -434,10 +645,18 @@ export default function DashboardPage() {
                     Use ParakeetAI for a real interview to get the job you have always dreamed of.
                   </p>
                   <button 
-                    onClick={() => router.push('/interview-sessions')}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                    onClick={handleStartSession}
+                    disabled={isCreatingSession}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                   >
-                    Start
+                    {isCreatingSession ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600"></div>
+                        <span>Creating...</span>
+                      </>
+                    ) : (
+                      <span>Start Interview</span>
+                    )}
                   </button>
                 </div>
               </div>
@@ -490,6 +709,22 @@ export default function DashboardPage() {
         onClose={() => setShowTrialModal(false)}
         onStart={handleStartTrialInterview}
         userId={user?.id}
+      />
+
+      {/* Out of Credits Modal */}
+      <OutOfCreditsModal
+        isOpen={showCreditsModal}
+        onClose={() => setShowCreditsModal(false)}
+        onGetCredits={handleGetCredits}
+      />
+
+      {/* Resume Interview Modal */}
+      <ResumeModal
+        isOpen={showResumeModal}
+        onClose={() => setShowResumeModal(false)}
+        sessionData={activeSession}
+        userId={user?.id || ''}
+        onResume={handleResumeInterview}
       />
     </div>
   )

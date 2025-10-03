@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import ConnectModal from './ConnectModal'
 import InterviewInterface from './InterviewInterface'
+import OutOfCreditsModal from './OutOfCreditsModal'
 
 interface ReadyToCreateModalProps {
   isOpen: boolean
@@ -32,13 +33,10 @@ export default function ReadyToCreateModal({
   const [showInterviewInterface, setShowInterviewInterface] = useState(false)
   const [interviewStream, setInterviewStream] = useState<MediaStream | null>(null)
   const [interviewPlatform, setInterviewPlatform] = useState<string>('')
+  const [sessionData, setSessionData] = useState<any>(null)
+  const [userId, setUserId] = useState<string>('')
 
   const handleCreate = async () => {
-    // Show connect modal instead of directly creating
-    setShowConnectModal(true)
-  }
-
-  const handleConnect = async (stream?: MediaStream, platform?: string) => {
     setIsLoading(true)
     
     try {
@@ -92,22 +90,30 @@ export default function ReadyToCreateModal({
       const sessionData = await sessionResponse.json()
       console.log('Interview session created:', sessionData)
 
+      // Store session data and user ID for passing to InterviewInterface
+      setSessionData(sessionData.session) // Store the actual session object, not the full response
+      setUserId(validateData.user.id)
+
       // Call the onCreate function to start the trial session
       await onCreate()
       
-      // If we have a stream, we can process it here
-      if (stream) {
-        console.log('Screen sharing stream received:', stream)
-        console.log('Platform detected:', platform)
-        // Here you would typically:
-        // 1. Start recording the stream
-        // 2. Process video/audio for AI analysis
-        // 3. Navigate to the interview interface
-      }
+      // Show connect modal after session is created
+      setShowConnectModal(true)
     } catch (error) {
       console.error('Error creating trial session:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleConnect = async (stream?: MediaStream, platform?: string) => {
+    // This function is called when screen sharing is successfully connected
+    if (stream && platform) {
+      console.log('Screen sharing stream received:', stream)
+      console.log('Platform detected:', platform)
+      handleStartInterview(stream, platform)
+    } else {
+      console.log('No stream or platform provided, cannot start interview interface')
     }
   }
 
@@ -123,9 +129,16 @@ export default function ReadyToCreateModal({
   }
 
   const handleExitInterview = () => {
+    // Additional cleanup to ensure stream is stopped
     if (interviewStream) {
-      interviewStream.getTracks().forEach(track => track.stop())
+      console.log('Parent: Additional stream cleanup...')
+      interviewStream.getTracks().forEach(track => {
+        console.log('Parent: Stopping track:', track.kind, track.label)
+        track.stop()
+      })
     }
+    
+    // Reset all interview state
     setInterviewStream(null)
     setInterviewPlatform('')
     setShowInterviewInterface(false)
@@ -229,7 +242,7 @@ export default function ReadyToCreateModal({
         onClose={handleClose}
         onConnect={handleConnect}
         onBack={handleConnectBack}
-        onStartInterview={handleStartInterview}
+        onStartInterview={() => {}} // Not used - session creation happens in handleConnect
         interviewData={interviewData || {
           company: 'Unknown Company',
           position: 'Unknown Position',
@@ -245,6 +258,8 @@ export default function ReadyToCreateModal({
           stream={interviewStream}
           platform={interviewPlatform}
           interviewData={interviewData}
+          sessionId={sessionData?.id}
+          userId={userId}
           onExit={handleExitInterview}
         />
       )}

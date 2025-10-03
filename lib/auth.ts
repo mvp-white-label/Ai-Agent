@@ -1,6 +1,8 @@
 import { NextAuthOptions } from 'next-auth'
 import { JWT } from 'next-auth/jwt'
 import { User } from './supabaseClient'
+import { NextApiRequest } from 'next'
+import { jwtVerify } from 'jose'
 
 // Custom session interface
 export interface CustomSession {
@@ -68,5 +70,50 @@ export function createSessionFromMicrosoftUser(user: User, accessToken: string, 
     },
     accessToken,
     idToken,
+  }
+}
+
+// Verify JWT token from request
+export async function verifyToken(req: NextApiRequest): Promise<{ success: boolean; userId?: string; error?: string }> {
+  try {
+    // Get the session token from various sources
+    let sessionToken = req.headers.authorization?.replace('Bearer ', '') || 
+                      req.body?.sessionToken || 
+                      req.query?.sessionToken;
+
+    // If no token found in headers/body/query, try to get it from cookies
+    if (!sessionToken) {
+      const cookies = req.headers.cookie;
+      if (cookies) {
+        const cookieMatch = cookies.match(/next-auth\.session-token=([^;]+)/);
+        if (cookieMatch) {
+          sessionToken = cookieMatch[1];
+        }
+      }
+    }
+
+    if (!sessionToken) {
+      return { success: false, error: 'No session token provided' };
+    }
+
+    // Verify the JWT token
+    const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET!);
+    const { payload } = await jwtVerify(sessionToken, secret);
+
+    if (!payload.userId) {
+      return { success: false, error: 'Invalid token payload' };
+    }
+
+    return { 
+      success: true, 
+      userId: payload.userId as string 
+    };
+
+  } catch (error) {
+    console.error('Token verification error:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Token verification failed' 
+    };
   }
 }

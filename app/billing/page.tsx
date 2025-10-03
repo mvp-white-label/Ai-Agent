@@ -10,38 +10,27 @@ interface User {
   approved: boolean
 }
 
-interface Subscription {
-  plan: string
-  status: string
-  nextBilling: string
-  amount: number
-  currency: string
-}
-
-interface PaymentMethod {
-  id: string
-  type: string
-  last4: string
-  brand: string
-  expiryMonth: number
-  expiryYear: number
-}
-
 export default function BillingPage() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [subscription, setSubscription] = useState<Subscription>({
-    plan: 'Free',
-    status: 'active',
-    nextBilling: '2024-02-15',
-    amount: 0,
-    currency: 'USD'
-  })
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
-  const [billingHistory, setBillingHistory] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const [showProfile, setShowProfile] = useState(false)
   const router = useRouter()
+
+  // Close profile dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (showProfile && !target.closest('.profile-dropdown')) {
+        setShowProfile(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showProfile])
 
   useEffect(() => {
     const validateSession = async () => {
@@ -65,33 +54,6 @@ export default function BillingPage() {
 
         if (data.valid && data.user) {
           setUser(data.user)
-          // Mock data - in real app, fetch from API
-          setPaymentMethods([
-            {
-              id: 'pm_1',
-              type: 'card',
-              last4: '4242',
-              brand: 'visa',
-              expiryMonth: 12,
-              expiryYear: 2025
-            }
-          ])
-          setBillingHistory([
-            {
-              id: 'inv_1',
-              date: '2024-01-15',
-              amount: 29.99,
-              status: 'paid',
-              description: 'Pro Plan - Monthly'
-            },
-            {
-              id: 'inv_2',
-              date: '2023-12-15',
-              amount: 29.99,
-              status: 'paid',
-              description: 'Pro Plan - Monthly'
-            }
-          ])
         } else {
           localStorage.removeItem('session')
           router.push('/login/')
@@ -107,22 +69,19 @@ export default function BillingPage() {
     validateSession()
   }, [router])
 
-  const handleUpgradePlan = (plan: string) => {
-    setSuccess(`Upgrading to ${plan} plan...`)
-    // In real app, integrate with payment processor
-    setTimeout(() => setSuccess(null), 3000)
+  const handleLogout = async () => {
+    try {
+      localStorage.removeItem('session')
+      router.push('/login/')
+    } catch (error) {
+      console.error('Logout error:', error)
+    }
   }
 
-  const handleAddPaymentMethod = () => {
-    setSuccess('Redirecting to add payment method...')
-    // In real app, integrate with payment processor
-    setTimeout(() => setSuccess(null), 3000)
-  }
-
-  const handleDownloadInvoice = (invoiceId: string) => {
-    setSuccess(`Downloading invoice ${invoiceId}...`)
-    // In real app, generate and download PDF
-    setTimeout(() => setSuccess(null), 3000)
+  const handleGetCredits = (plan: string) => {
+    console.log(`Getting credits for plan: ${plan}`)
+    // Here you would integrate with payment processing
+    alert(`Redirecting to payment for ${plan} plan...`)
   }
 
   if (isLoading) {
@@ -133,12 +92,12 @@ export default function BillingPage() {
     )
   }
 
-  if (!user) {
+  if (error || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">Access Denied</h1>
-          <p className="text-gray-600 mb-4">You are not authorized to access this page.</p>
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
+          <p className="text-gray-600 mb-4">{error || 'Access denied'}</p>
           <button
             onClick={() => router.push('/login/')}
             className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
@@ -154,230 +113,271 @@ export default function BillingPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => router.push('/dashboard')}
-                className="flex items-center text-gray-600 hover:text-gray-900"
+                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
               >
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                Back to Dashboard
+                <span>Back to Dashboard</span>
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">Billing & Subscription</h1>
+              <div className="h-6 w-px bg-gray-300"></div>
+              <h1 className="text-xl font-semibold text-gray-900">Buy Interview Credits</h1>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <div className="relative profile-dropdown">
+                <button
+                  onClick={() => setShowProfile(!showProfile)}
+                  className="flex items-center space-x-2 text-gray-700 hover:text-gray-900"
+                >
+                  <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium">{user.name}</span>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                
+                {/* Profile Dropdown */}
+                {showProfile && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                    <div className="p-4 border-b border-gray-200">
+                      <h3 className="font-semibold text-gray-900">Profile</h3>
+                      <p className="text-sm text-gray-600">{user.email}</p>
+                    </div>
+                    <div className="p-2">
+                      <button
+                        onClick={() => {
+                          setShowProfile(false)
+                          router.push('/profile')
+                        }}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+                      >
+                        View Profile
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowProfile(false)
+                          router.push('/settings')
+                        }}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+                      >
+                        Settings
+                      </button>
+                      <hr className="my-2" />
+                      <button
+                        onClick={handleLogout}
+                        className="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        {/* Success/Error Messages */}
-        {success && (
-          <div className="mb-6 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-md">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Special Offer Banner */}
+        <div className="bg-yellow-100 border border-yellow-200 rounded-lg p-4 mb-8">
+          <div className="text-center">
+            <p className="text-yellow-800 font-medium">
+              Special offer for India users: Use code <span className="font-bold">INDIA25</span> for 25% off!
+            </p>
+          </div>
+        </div>
+
+        {/* Pricing Section */}
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-green-600 mb-4">PRICING</h2>
+          <div className="text-4xl font-bold text-green-700 mb-2">
+            No Subscription
+          </div>
+          <div className="text-4xl font-bold text-green-700 mb-6">
+            One-time payment ✨
+          </div>
+          
+          {/* Features Bar */}
+          <div className="bg-gray-100 rounded-lg p-4 mb-8 max-w-2xl mx-auto">
+            <div className="flex justify-center items-center space-x-8 text-sm text-gray-600">
+              <span className="flex items-center">
+                <svg className="w-4 h-4 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm">{success}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-            <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                30-Day Money Back
+              </span>
+              <span className="flex items-center">
+                <svg className="w-4 h-4 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Current Plan */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Current Plan</h2>
-              </div>
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-xl font-semibold text-gray-900">{subscription.plan} Plan</h3>
-                    <p className="text-sm text-gray-600">
-                      Status: <span className={`font-medium ${
-                        subscription.status === 'active' ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-gray-900">
-                      ${subscription.amount}
-                      <span className="text-sm font-normal text-gray-600">/month</span>
-                    </p>
-                  </div>
-                </div>
-
-                {subscription.plan === 'Free' && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <h4 className="font-medium text-blue-900 mb-2">Upgrade to Pro</h4>
-                    <p className="text-sm text-blue-700 mb-3">
-                      Get unlimited access to all features, priority support, and advanced analytics.
-                    </p>
-                    <button
-                      onClick={() => handleUpgradePlan('Pro')}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      Upgrade Now
-                    </button>
-                  </div>
-                )}
-
-                <div className="text-sm text-gray-600">
-                  <p>Next billing: {new Date(subscription.nextBilling).toLocaleDateString()}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Available Plans */}
-            <div className="mt-6 bg-white rounded-lg shadow-sm border border-gray-200">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Available Plans</h2>
-              </div>
-              <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="border border-gray-200 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Free Plan</h3>
-                    <p className="text-3xl font-bold text-gray-900 mb-2">$0<span className="text-sm font-normal">/month</span></p>
-                    <ul className="text-sm text-gray-600 space-y-1 mb-4">
-                      <li>• 10 minutes trial sessions</li>
-                      <li>• Basic interview questions</li>
-                      <li>• Email support</li>
-                    </ul>
-                    <button
-                      onClick={() => handleUpgradePlan('Free')}
-                      className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Current Plan
-                    </button>
-                  </div>
-
-                  <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Pro Plan</h3>
-                    <p className="text-3xl font-bold text-gray-900 mb-2">$29.99<span className="text-sm font-normal">/month</span></p>
-                    <ul className="text-sm text-gray-600 space-y-1 mb-4">
-                      <li>• Unlimited interview sessions</li>
-                      <li>• Advanced AI features</li>
-                      <li>• Priority support</li>
-                      <li>• Analytics dashboard</li>
-                    </ul>
-                    <button
-                      onClick={() => handleUpgradePlan('Pro')}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      Upgrade to Pro
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Payment Methods & Billing History */}
-          <div className="space-y-6">
-            {/* Payment Methods */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Payment Methods</h2>
-              </div>
-              <div className="p-6">
-                {paymentMethods.length > 0 ? (
-                  <div className="space-y-3">
-                    {paymentMethods.map((method) => (
-                      <div key={method.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
-                            <span className="text-xs font-semibold text-gray-600">
-                              {method.brand.toUpperCase()}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">
-                              •••• {method.last4}
-                            </p>
-                            <p className="text-xs text-gray-600">
-                              Expires {method.expiryMonth}/{method.expiryYear}
-                            </p>
-                          </div>
-                        </div>
-                        <button className="text-sm text-red-600 hover:text-red-700">
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-600 mb-4">No payment methods on file</p>
-                )}
-                <button
-                  onClick={handleAddPaymentMethod}
-                  className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Add Payment Method
-                </button>
-              </div>
-            </div>
-
-            {/* Billing History */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-900">Billing History</h2>
-              </div>
-              <div className="p-6">
-                {billingHistory.length > 0 ? (
-                  <div className="space-y-3">
-                    {billingHistory.map((invoice) => (
-                      <div key={invoice.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{invoice.description}</p>
-                          <p className="text-xs text-gray-600">{new Date(invoice.date).toLocaleDateString()}</p>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                          <span className="text-sm font-medium text-gray-900">${invoice.amount}</span>
-                          <button
-                            onClick={() => handleDownloadInvoice(invoice.id)}
-                            className="text-sm text-blue-600 hover:text-blue-700"
-                          >
-                            Download
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-600">No billing history available</p>
-                )}
-              </div>
+                Credits Never Expire
+              </span>
+              <span className="flex items-center">
+                <svg className="w-4 h-4 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                1 Credit = 1h Interview
+              </span>
             </div>
           </div>
         </div>
-      </div>
+
+        {/* Pricing Plans */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+          {/* Basic Plan */}
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center shadow-sm">
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Basic</h3>
+            <div className="text-4xl font-bold text-gray-900 mb-2">₹2,650</div>
+            <div className="text-lg text-gray-600 mb-6">($29.50)</div>
+            <div className="text-lg text-gray-700 mb-8">3 Interview Credits</div>
+            <button
+              onClick={() => handleGetCredits('Basic')}
+              className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-green-700 transition-colors"
+            >
+              Get Credits →
+            </button>
+          </div>
+
+          {/* Plus Plan - Highlighted */}
+          <div className="bg-green-600 rounded-lg border-2 border-green-600 p-8 text-center shadow-lg transform scale-105">
+            <h3 className="text-2xl font-bold text-white mb-4">Plus</h3>
+            <div className="text-4xl font-bold text-white mb-2">₹5,300</div>
+            <div className="text-lg text-green-100 mb-6">($59.00)</div>
+            <div className="text-lg text-white mb-8">6 Interview Credits + 2 Free</div>
+            <button
+              onClick={() => handleGetCredits('Plus')}
+              className="w-full bg-white text-green-600 py-3 px-6 rounded-lg font-medium hover:bg-gray-100 transition-colors"
+            >
+              Get Credits →
+            </button>
+          </div>
+
+          {/* Advanced Plan */}
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center shadow-sm">
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Advanced</h3>
+            <div className="text-4xl font-bold text-gray-900 mb-2">₹7,950</div>
+            <div className="text-lg text-gray-600 mb-6">($88.50)</div>
+            <div className="text-lg text-gray-700 mb-8">9 Interview Credits + 6 Free</div>
+            <button
+              onClick={() => handleGetCredits('Advanced')}
+              className="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-green-700 transition-colors"
+            >
+              Get Credits →
+            </button>
+          </div>
+        </div>
+
+        {/* Credit Usage Info */}
+        <div className="text-center mb-16">
+          <div className="bg-gray-100 rounded-lg p-4 max-w-md mx-auto">
+            <div className="flex items-center justify-center text-gray-600">
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>You can split credits into 30-minute sessions. →</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Testimonials Section */}
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-gray-900 mb-4">People love ParakeetAI</h2>
+          <div className="text-4xl mb-8">💬</div>
+        </div>
+
+        {/* Testimonials Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Testimonial 1 */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center mb-4">
+              <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+                OK
+              </div>
+              <div className="ml-3">
+                <div className="font-semibold text-gray-900">Oskar Kader</div>
+                <div className="text-sm text-gray-500">Feb 14, 2025</div>
+              </div>
+            </div>
+            <p className="text-gray-700 text-sm leading-relaxed">
+              "ParakeetAI is an absolute cheat! It's like having a backup when your mind goes blank. 
+              Highly recommend for upcoming interviews."
+            </p>
+          </div>
+
+          {/* Testimonial 2 */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center mb-4">
+              <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">
+                PW
+              </div>
+              <div className="ml-3">
+                <div className="font-semibold text-gray-900">Pat Walls</div>
+                <div className="text-sm text-gray-500">11:06 PM - Jan 7, 2025</div>
+              </div>
+            </div>
+            <p className="text-gray-700 text-sm leading-relaxed mb-2">
+              "Weekend AI project + a few $10k / month business. We're in the golden age of solopreneurship."
+            </p>
+            <div className="flex items-center text-gray-500 text-xs">
+              <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+              </svg>
+              1K
+            </div>
+          </div>
+
+          {/* Testimonial 3 */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center mb-4">
+              <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center text-white font-bold">
+                RD
+              </div>
+              <div className="ml-3">
+                <div className="font-semibold text-gray-900">Rosie D.</div>
+                <div className="text-sm text-gray-500">Jan 17, 2025</div>
+              </div>
+            </div>
+            <p className="text-gray-700 text-sm leading-relaxed">
+              "Absolutely zero faults. It's really a game changer! I've recommended it to all my friends and family. 
+              Thanks for creating such an amazing app!"
+            </p>
+          </div>
+
+          {/* Testimonial 4 */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center mb-4">
+              <div className="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold">
+                JS
+              </div>
+              <div className="ml-3">
+                <div className="font-semibold text-gray-900">Jure Satorok</div>
+                <div className="text-sm text-gray-500">9:11 PM - Feb 14, 2025</div>
+              </div>
+            </div>
+            <p className="text-gray-700 text-sm leading-relaxed mb-2">
+              "Super-fast transcriptions and spot-on AI answers. No subscription, just pay as you go. Love it!"
+            </p>
+            <div className="flex items-center text-gray-500 text-xs">
+              <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+              </svg>
+              6
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   )
 }
-
-

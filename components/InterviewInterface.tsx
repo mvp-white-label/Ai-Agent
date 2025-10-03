@@ -14,6 +14,8 @@ interface InterviewInterfaceProps {
     extraContext?: string
     selectedResumeId?: string
   }
+  sessionId?: string
+  userId?: string
   onExit: () => void
 }
 
@@ -21,6 +23,8 @@ export default function InterviewInterface({
   stream, 
   platform, 
   interviewData, 
+  sessionId,
+  userId,
   onExit 
 }: InterviewInterfaceProps) {
   const [isListening, setIsListening] = useState(false)
@@ -38,26 +42,95 @@ export default function InterviewInterface({
   const [isScreenDisconnected, setIsScreenDisconnected] = useState(false)
   const [showReconnectModal, setShowReconnectModal] = useState(false)
   const [isVideoLoading, setIsVideoLoading] = useState(true)
+  const [showStopSharingOptions, setShowStopSharingOptions] = useState(false)
+  const [isExiting, setIsExiting] = useState(false)
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null)
+  const [currentDuration, setCurrentDuration] = useState(0)
+  const [currentDurationSeconds, setCurrentDurationSeconds] = useState(0)
   
   const videoRef = useRef<HTMLVideoElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const stopSharingRef = useRef<HTMLDivElement>(null)
+
+  // Handle click outside to close stop sharing options
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (stopSharingRef.current && !stopSharingRef.current.contains(event.target as Node)) {
+        setShowStopSharingOptions(false)
+      }
+    }
+
+    if (showStopSharingOptions) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showStopSharingOptions])
+
+  // Cleanup effect to ensure stream is stopped when component unmounts
+  useEffect(() => {
+    return () => {
+      console.log('InterviewInterface: Component unmounting, cleaning up stream...')
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          console.log('InterviewInterface: Cleaning up track:', track.kind, track.label)
+          track.stop()
+        })
+      }
+      
+      // Also clear video element
+      if (videoRef.current) {
+        console.log('InterviewInterface: Clearing video element on unmount')
+        videoRef.current.pause()
+        videoRef.current.srcObject = null
+        videoRef.current.load()
+      }
+    }
+  }, [stream])
 
   // Initialize video stream
   useEffect(() => {
     if (videoRef.current && stream) {
       console.log('Setting video stream:', stream)
       console.log('Video tracks:', stream.getVideoTracks())
+      console.log('Stream active:', stream.active)
+      console.log('Stream id:', stream.id)
+      
+      // Validate stream has video tracks
+      const videoTracks = stream.getVideoTracks()
+      if (videoTracks.length === 0) {
+        console.error('No video tracks found in stream')
+        return
+      }
+      
+      const mainVideoTrack = videoTracks[0]
+      console.log('Video track settings:', mainVideoTrack.getSettings())
+      console.log('Video track constraints:', mainVideoTrack.getConstraints())
       
       const videoElement = videoRef.current
       
       // Stop any existing video playback first
       if (videoElement.srcObject) {
+        console.log('Clearing existing video stream before setting new one')
         videoElement.pause()
         videoElement.srcObject = null
+        videoElement.load() // Force clear any cached stream
+        
+        // Small delay to ensure the old stream is completely cleared
+        setTimeout(() => {
+          if (videoRef.current && stream) {
+            console.log('Setting new video stream after cleanup delay')
+            videoRef.current.srcObject = stream
+            playVideo()
+          }
+        }, 100)
+        return // Exit early, the timeout will handle setting the new stream
       }
       
-      // Set new stream
+      // Set new stream immediately if no existing stream
       videoElement.srcObject = stream
       
       // Set video properties for better display
@@ -65,9 +138,27 @@ export default function InterviewInterface({
       videoElement.style.height = '100%'
       videoElement.style.objectFit = 'contain'
       videoElement.style.backgroundColor = 'black'
+      videoElement.style.minHeight = '300px' // Ensure minimum height
+      videoElement.style.display = 'block' // Ensure it's visible
+      
+      // Set video attributes
+      videoElement.setAttribute('playsinline', 'true')
+      videoElement.setAttribute('autoplay', 'true')
+      videoElement.setAttribute('muted', 'true')
       
       // Force video to load
       videoElement.load()
+      
+      // Debug: Check video element after setup
+      console.log('Video element after setup:', {
+        srcObject: !!videoElement.srcObject,
+        videoWidth: videoElement.videoWidth,
+        videoHeight: videoElement.videoHeight,
+        readyState: videoElement.readyState,
+        networkState: videoElement.networkState,
+        paused: videoElement.paused,
+        muted: videoElement.muted
+      })
       
       // Play video with better error handling
       const playVideo = async () => {
@@ -128,9 +219,9 @@ export default function InterviewInterface({
       playVideo()
       
       // Handle video track end event (screen sharing stopped)
-      const videoTrack = stream.getVideoTracks()[0]
-      if (videoTrack) {
-        videoTrack.addEventListener('ended', () => {
+      const endVideoTrack = stream.getVideoTracks()[0]
+      if (endVideoTrack) {
+        endVideoTrack.addEventListener('ended', () => {
           console.log('Screen sharing ended by user')
           setIsScreenDisconnected(true)
           setShowReconnectModal(true)
@@ -141,10 +232,18 @@ export default function InterviewInterface({
       setTimeout(() => {
         handleAnalyzeScreen()
       }, 2000)
+      
+      // Set session status to active when interview starts
+      if (sessionId && userId) {
+        console.log('Interview started - setting session status to active')
+        const startTime = new Date()
+        setSessionStartTime(startTime)
+        updateSessionStatus('active', 0) // Initialize AI usage to 0 and set started_at
+      }
     } else {
       console.log('Video stream not available:', { videoRef: !!videoRef.current, stream: !!stream })
     }
-  }, [stream])
+  }, [stream, sessionId, userId])
 
   // Timer countdown
   useEffect(() => {
@@ -184,6 +283,24 @@ export default function InterviewInterface({
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
     }
   }, [transcript])
+
+  // Track session duration with precise seconds
+  useEffect(() => {
+    if (sessionStartTime) {
+      const interval = setInterval(() => {
+        const now = new Date()
+        const durationMs = now.getTime() - sessionStartTime.getTime()
+        const durationSeconds = Math.floor(durationMs / 1000)
+        const durationMinutes = Math.floor(durationSeconds / 60)
+        const remainingSeconds = durationSeconds % 60
+        
+        setCurrentDuration(durationMinutes)
+        setCurrentDurationSeconds(remainingSeconds)
+      }, 1000) // Update every second
+
+      return () => clearInterval(interval)
+    }
+  }, [sessionStartTime])
 
   // Initialize speech recognition
   useEffect(() => {
@@ -281,10 +398,62 @@ export default function InterviewInterface({
     }
   }
 
+  // Function to update session status
+  const updateSessionStatus = async (status: string, aiUsage?: number) => {
+    if (!sessionId || !userId) {
+      console.log('Missing sessionId or userId - cannot update session status')
+      return
+    }
+
+    try {
+      console.log('Updating session status:', { sessionId, userId, status, aiUsage })
+      
+      const response = await fetch('/api/sessions/update-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId,
+          userId,
+          status,
+          aiUsage
+        }),
+      })
+
+      const data = await response.json()
+      console.log('Session status update response:', data)
+      console.log('Response status:', response.status)
+      
+      if (data.success) {
+        console.log('Session status updated successfully:', data.session)
+      } else {
+        console.error('Failed to update session status:', data.error)
+        console.error('Full response:', data)
+      }
+    } catch (error) {
+      console.error('Error updating session status:', error)
+    }
+  }
+
   const handleAnalyzeScreen = async () => {
     setIsAnalyzing(true)
     
     try {
+      // Update AI usage count if sessionId and userId are available
+      console.log('Analyze Screen clicked - sessionId:', sessionId, 'userId:', userId)
+      
+      if (sessionId && userId) {
+        console.log('Calling API to update AI usage count...')
+        console.log('SessionId type:', typeof sessionId, 'Value:', sessionId)
+        console.log('UserId type:', typeof userId, 'Value:', userId)
+        
+        // Update session status to active (API will handle AI usage increment)
+        await updateSessionStatus('active')
+      } else {
+        console.log('Missing sessionId or userId - cannot update AI usage count')
+      }
+      
       // Simulate screen analysis
       await new Promise(resolve => setTimeout(resolve, 3000))
       
@@ -415,23 +584,78 @@ export default function InterviewInterface({
   }
 
   const handleEndInterview = () => {
+    console.log('🚨 EXIT BUTTON CLICKED - STARTING EXIT PROCESS')
+    setIsExiting(true) // Show visual indicator immediately
+    
     console.log('InterviewInterface: Ending interview...')
+    console.log('InterviewInterface: Stream exists:', !!stream)
+    console.log('InterviewInterface: Stream tracks:', stream?.getTracks().length || 0)
+    
+    // Clear video element IMMEDIATELY for instant visual feedback
+    if (videoRef.current) {
+      console.log('🚨 CLEARING VIDEO ELEMENT IMMEDIATELY')
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+      videoRef.current.load()
+      // Show a black screen immediately
+      videoRef.current.style.backgroundColor = 'black'
+      videoRef.current.style.display = 'none' // Hide the video element completely
+      console.log('🚨 VIDEO ELEMENT CLEARED AND HIDDEN')
+    } else {
+      console.log('🚨 NO VIDEO REF FOUND!')
+    }
     
     // Stop speech recognition
     stopListening()
     
-    // Stop screen sharing if stream exists
+    // Stop screen sharing if stream exists - IMMEDIATELY
     if (stream) {
-      console.log('InterviewInterface: Stopping screen sharing stream...')
-      stream.getTracks().forEach(track => {
-        console.log('InterviewInterface: Stopping track:', track.kind, track.label)
-        track.stop()
+      console.log('🚨 STOPPING SCREEN SHARING IMMEDIATELY')
+      const tracks = stream.getTracks()
+      console.log('InterviewInterface: Found tracks to stop:', tracks.length)
+      
+      // Stop all tracks immediately and aggressively
+      tracks.forEach(track => {
+        console.log('🚨 STOPPING TRACK:', track.kind, track.label, 'State:', track.readyState)
+        try {
+          track.stop()
+          console.log('🚨 TRACK STOPPED:', track.kind, 'New state:', track.readyState)
+        } catch (error) {
+          console.log('🚨 ERROR STOPPING TRACK:', error)
+        }
       })
+      
+      // Also try to stop the stream itself
+      try {
+        if (stream.getTracks) {
+          stream.getTracks().forEach(track => {
+            if (track.readyState === 'live') {
+              console.log('🚨 FORCE STOPPING LIVE TRACK:', track.kind)
+              track.stop()
+            }
+          })
+        }
+      } catch (error) {
+        console.log('🚨 ERROR IN FORCE STOP:', error)
+      }
+    } else {
+      console.log('🚨 NO STREAM TO STOP')
     }
     
-    // Clear video element
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
+    // Also try to find and clear any other video elements that might be using the stream
+    const allVideoElements = document.querySelectorAll('video')
+    allVideoElements.forEach(video => {
+      if (video.srcObject === stream) {
+        console.log('InterviewInterface: Clearing additional video element')
+        video.srcObject = null
+        video.load()
+      }
+    })
+    
+    // Update session status to completed
+    if (sessionId && userId) {
+      console.log('Interview ended - setting session status to completed')
+      updateSessionStatus('completed')
     }
     
     console.log('InterviewInterface: Calling onExit...')
@@ -447,18 +671,43 @@ export default function InterviewInterface({
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-sm font-medium text-gray-700">Screen Share</h3>
             <div className="flex space-x-2">
-              <button 
-                onClick={() => {
-                  if (stream) {
-                    stream.getTracks().forEach(track => track.stop())
-                    setIsScreenDisconnected(true)
-                    setShowReconnectModal(true)
-                  }
-                }}
-                className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
-              >
-                Stop Sharing
-              </button>
+              <div className="relative" ref={stopSharingRef}>
+                <button 
+                  onClick={() => setShowStopSharingOptions(!showStopSharingOptions)}
+                  className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
+                >
+                  Stop Sharing
+                </button>
+                {showStopSharingOptions && (
+                  <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                    <button
+                      onClick={() => {
+                        console.log('User chose to reconnect screen sharing')
+                        setShowStopSharingOptions(false)
+                        // Stop current stream and show reconnect modal
+                        if (stream) {
+                          stream.getTracks().forEach(track => track.stop())
+                          setIsScreenDisconnected(true)
+                          setShowReconnectModal(true)
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 rounded-t-lg"
+                    >
+                      🔄 Reconnect
+                    </button>
+                    <button
+                      onClick={() => {
+                        console.log('User chose to end interview')
+                        setShowStopSharingOptions(false)
+                        handleEndInterview()
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 rounded-b-lg"
+                    >
+                      ❌ End Interview
+                    </button>
+                  </div>
+                )}
+              </div>
               <button className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">
                 Fullscreen
               </button>
@@ -488,7 +737,19 @@ export default function InterviewInterface({
                 objectFit: 'contain'
               }}
             />
-            {(!stream || isScreenDisconnected) && (
+            {isExiting && (
+              <div className="absolute inset-0 flex items-center justify-center text-white bg-red-600">
+                <div className="text-center">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center mb-2 mx-auto bg-red-700 animate-pulse">
+                    <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-bold">ENDING INTERVIEW...</p>
+                </div>
+              </div>
+            )}
+            {!isExiting && (!stream || isScreenDisconnected) && (
               <div className="absolute inset-0 flex items-center justify-center text-white">
                 <div className="text-center">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-2 mx-auto ${
@@ -591,6 +852,11 @@ export default function InterviewInterface({
             <div className="text-sm text-gray-600">
               {formatTime(timeRemaining)} (Trial)
             </div>
+            {currentDuration > 0 && (
+              <div className="text-sm text-blue-600 font-medium">
+                Elapsed: {currentDuration}m {currentDurationSeconds}s
+              </div>
+            )}
             <div className="flex items-center space-x-1 text-sm text-gray-600">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />

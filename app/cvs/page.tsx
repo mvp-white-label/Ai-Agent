@@ -20,6 +20,21 @@ interface Resume {
   user_id: string
 }
 
+interface ParsedResumeData {
+  id: string
+  resume_id: string
+  skills: string[]
+  experience: any[]
+  education: any[]
+  certifications: any[]
+  projects: any[]
+  summary: string
+  suggestedQuestions: string[]
+  ai_model_used: string
+  parsing_status: string
+  created_at: string
+}
+
 export default function CVsPage() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -27,6 +42,13 @@ export default function CVsPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [parsingResume, setParsingResume] = useState<string | null>(null)
+  const [parsedData, setParsedData] = useState<ParsedResumeData | null>(null)
+  const [showParsedData, setShowParsedData] = useState(false)
+  const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null)
+  const [generatedAnswer, setGeneratedAnswer] = useState<string | null>(null)
+  const [isGeneratingAnswer, setIsGeneratingAnswer] = useState(false)
+  const [resumeText, setResumeText] = useState<string>('')
   const router = useRouter()
 
   useEffect(() => {
@@ -74,6 +96,7 @@ export default function CVsPage() {
       loadResumes()
     }
   }, [user?.id])
+
 
   const loadResumes = async () => {
     if (!user?.id) {
@@ -195,6 +218,178 @@ export default function CVsPage() {
     })
   }
 
+  // Function to extract text from resume file
+  const extractTextFromResume = async (fileBlob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      
+      reader.onload = async (e) => {
+        try {
+          const dataUrl = e.target?.result as string
+          
+          // Extract base64 data from data URL
+          const base64 = dataUrl.split(',')[1]
+          
+          // Send to PDF text extraction API
+          const response = await fetch('/api/extract-text', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ fileData: base64 }),
+          })
+          
+          const data = await response.json()
+          
+          if (data.success) {
+            resolve(data.text)
+          } else {
+            throw new Error(data.error || 'Failed to extract text')
+          }
+        } catch (error) {
+          reject(error)
+        }
+      }
+      
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'))
+      }
+      
+      // Use readAsDataURL to get base64 directly
+      reader.readAsDataURL(fileBlob)
+    })
+  }
+
+  const handleParseResume = async (resumeId: string) => {
+    setParsingResume(resumeId)
+    setError(null)
+
+    console.log('Starting parse for resume ID:', resumeId)
+    console.log('User ID:', user?.id)
+
+    try {
+      // First, get the resume file content
+      console.log('Fetching resume file...')
+      const resumeResponse = await fetch(`/api/resumes/download?id=${resumeId}`)
+      if (!resumeResponse.ok) {
+        console.error('Failed to download resume:', resumeResponse.status, resumeResponse.statusText)
+        throw new Error('Failed to download resume')
+      }
+
+      // Extract text from the actual resume file
+      console.log('Extracting text from resume file...')
+      const resumeBlob = await resumeResponse.blob()
+      
+      // Check if it's a PDF file
+      if (resumeBlob.type === 'application/pdf') {
+        try {
+          const resumeText = await extractTextFromResume(resumeBlob)
+          console.log('Extracted resume text length:', resumeText.length)
+          console.log('Resume text preview:', resumeText.substring(0, 200) + '...')
+          
+          // Check if text extraction was successful
+          if (resumeText && resumeText.length > 50) {
+            // Store resume text for answer generation
+            setResumeText(resumeText)
+            
+            // Use the extracted text for parsing
+            const parseResponse = await fetch('/api/resumes/parse', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                resumeId,
+                resumeText,
+                userId: user?.id
+              }),
+            })
+
+            const parseData = await parseResponse.json()
+            console.log('Parse response status:', parseResponse.status)
+            console.log('Parse response data:', parseData)
+
+            if (parseData.success) {
+              console.log('Setting parsed data:', parseData.data)
+              setParsedData(parseData.data)
+              setShowParsedData(true)
+              setSuccess('Resume parsed successfully!')
+              setTimeout(() => setSuccess(null), 3000)
+            } else {
+              setError(parseData.error || 'Failed to parse resume')
+            }
+          } else {
+            setError('Could not extract meaningful text from the PDF. Please ensure the PDF contains readable text.')
+          }
+        } catch (extractError) {
+          console.error('Text extraction error:', extractError)
+          setError('Failed to extract text from PDF. Please try with a different PDF file.')
+        }
+      } else {
+        // For non-PDF files, show a message
+        setError('Only PDF files are supported for text extraction. Please upload a PDF resume.')
+      }
+    } catch (error) {
+      console.error('Error parsing resume:', error)
+      setError('Failed to parse resume')
+    } finally {
+      setParsingResume(null)
+    }
+  }
+
+  const handleViewParsedData = async (resumeId: string) => {
+    try {
+      const response = await fetch(`/api/resumes/parsed-data?resumeId=${resumeId}&userId=${user?.id}`)
+      const data = await response.json()
+
+      if (data.success) {
+        setParsedData(data.data)
+        setShowParsedData(true)
+      } else {
+        setError(data.error || 'Failed to load parsed data')
+      }
+    } catch (error) {
+      console.error('Error loading parsed data:', error)
+      setError('Failed to load parsed data')
+    }
+  }
+
+  const handleQuestionClick = async (question: string) => {
+    if (!parsedData || !resumeText) return
+
+    setSelectedQuestion(question)
+    setGeneratedAnswer(null)
+    setIsGeneratingAnswer(true)
+
+    try {
+      const response = await fetch('/api/generate-answer', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question,
+          resumeText,
+          skills: parsedData.skills,
+          experience: parsedData.experience
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setGeneratedAnswer(data.answer)
+      } else {
+        setError(data.error || 'Failed to generate answer')
+      }
+    } catch (error) {
+      console.error('Error generating answer:', error)
+      setError('Failed to generate answer')
+    } finally {
+      setIsGeneratingAnswer(false)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -282,7 +477,10 @@ export default function CVsPage() {
             <p className="text-sm text-gray-600 mb-4">
               Start a <span className="font-semibold">10min</span> free trial session or buy credits for full-length interview sessions.
             </p>
-            <button className="w-full bg-gradient-to-r from-blue-600 to-green-500 text-white py-2 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-green-600 transition-all duration-200 shadow-md">
+            <button 
+              onClick={() => router.push('/billing')}
+              className="w-full bg-gradient-to-r from-blue-600 to-green-500 text-white py-2 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-green-600 transition-all duration-200 shadow-md"
+            >
               Get Credits
             </button>
           </div>
@@ -414,6 +612,13 @@ export default function CVsPage() {
                         <div className="col-span-2">
                           <div className="flex space-x-2">
                             <button
+                              onClick={() => handleParseResume(resume.id)}
+                              disabled={parsingResume === resume.id}
+                              className="text-green-600 hover:text-green-900 text-sm disabled:opacity-50"
+                            >
+                              {parsingResume === resume.id ? 'Parsing...' : 'Parse Resume'}
+                            </button>
+                            <button
                               onClick={() => window.open(`/api/resumes/download?id=${resume.id}`, '_blank')}
                               className="text-blue-600 hover:text-blue-900 text-sm"
                             >
@@ -436,6 +641,217 @@ export default function CVsPage() {
           </div>
         </main>
       </div>
+
+      {/* Parsed Resume Data Modal */}
+      {showParsedData && parsedData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-900">AI-Parsed Resume Data</h2>
+                <button
+                  onClick={() => setShowParsedData(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Skills */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Skills</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {parsedData.skills && parsedData.skills.length > 0 ? (
+                      parsedData.skills.map((skill, index) => (
+                        <span key={index} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                          {skill}
+                        </span>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-sm">No skills extracted</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Summary */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Summary</h3>
+                  <p className="text-gray-700 text-sm">
+                    {parsedData.summary || 'No summary available'}
+                  </p>
+                </div>
+
+                {/* Experience */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Experience</h3>
+                  <div className="space-y-3">
+                    {parsedData.experience && parsedData.experience.length > 0 ? (
+                      parsedData.experience.map((exp, index) => (
+                        <div key={index} className="border-l-4 border-blue-500 pl-4">
+                          <h4 className="font-medium text-gray-900 text-sm">{exp.position}</h4>
+                          <p className="text-xs text-gray-600">{exp.company}</p>
+                          <p className="text-xs text-gray-500">{exp.duration}</p>
+                          <p className="text-xs text-gray-700 mt-1">{exp.description}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-sm">No experience data extracted</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Education */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Education</h3>
+                  <div className="space-y-2">
+                    {parsedData.education && parsedData.education.length > 0 ? (
+                      parsedData.education.map((edu, index) => (
+                        <div key={index} className="border-l-4 border-green-500 pl-4">
+                          <h4 className="font-medium text-gray-900 text-sm">{edu.degree}</h4>
+                          <p className="text-xs text-gray-600">{edu.institution}</p>
+                          <p className="text-xs text-gray-500">{edu.field} - {edu.year}</p>
+                          {edu.cgpa && (
+                            <p className="text-xs text-blue-600 font-medium">CGPA: {edu.cgpa}</p>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-sm">No education data extracted</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Certifications */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Certifications</h3>
+                  <div className="space-y-2">
+                    {parsedData.certifications && parsedData.certifications.length > 0 ? (
+                      parsedData.certifications.map((cert, index) => (
+                        <div key={index} className="border-l-4 border-orange-500 pl-4">
+                          <h4 className="font-medium text-gray-900 text-sm">{cert.name}</h4>
+                          <p className="text-xs text-gray-600">{cert.issuer}</p>
+                          <p className="text-xs text-gray-500">{cert.year}</p>
+                          {cert.validity && (
+                            <p className="text-xs text-green-600">Valid until: {cert.validity}</p>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-sm">No certifications found</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Projects */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Projects</h3>
+                  <div className="space-y-3">
+                    {parsedData.projects && parsedData.projects.length > 0 ? (
+                      parsedData.projects.map((project, index) => (
+                        <div key={index} className="border-l-4 border-purple-500 pl-4">
+                          <h4 className="font-medium text-gray-900 text-sm">{project.name}</h4>
+                          <p className="text-xs text-gray-700">{project.description}</p>
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {project.technologies?.map((tech: string, techIndex: number) => (
+                              <span key={techIndex} className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs">
+                                {tech}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-sm">No projects data extracted</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Suggested Questions */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Suggested Interview Questions</h3>
+                  <div className="space-y-2">
+                    {parsedData.suggestedQuestions && parsedData.suggestedQuestions.length > 0 ? (
+                      parsedData.suggestedQuestions.map((questionObj: any, index: number) => {
+                        const question = typeof questionObj === 'string' ? questionObj : questionObj.question
+                        const category = typeof questionObj === 'object' ? questionObj.category : 'general'
+                        const difficulty = typeof questionObj === 'object' ? questionObj.difficulty : 'medium'
+                        
+                        return (
+                          <div key={index} className="space-y-2">
+                            <div 
+                              className="p-3 bg-yellow-50 border border-yellow-200 rounded cursor-pointer hover:bg-yellow-100 transition-colors"
+                              onClick={() => handleQuestionClick(question)}
+                            >
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm text-gray-700 font-medium">{question}</p>
+                                <div className="flex items-center space-x-2">
+                                  <span className={`px-2 py-1 text-xs rounded ${
+                                    category === 'technical' ? 'bg-blue-100 text-blue-800' :
+                                    category === 'project' ? 'bg-green-100 text-green-800' :
+                                    category === 'behavioral' ? 'bg-purple-100 text-purple-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {category}
+                                  </span>
+                                  <span className={`px-2 py-1 text-xs rounded ${
+                                    difficulty === 'easy' ? 'bg-green-100 text-green-800' :
+                                    difficulty === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {difficulty}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Show answer if this question is selected */}
+                            {selectedQuestion === question && (
+                              <div className="p-4 bg-blue-50 border border-blue-200 rounded">
+                                {isGeneratingAnswer ? (
+                                  <div className="flex items-center space-x-2">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                    <p className="text-sm text-blue-600">Generating answer...</p>
+                                  </div>
+                                ) : generatedAnswer ? (
+                                  <div>
+                                    <h4 className="text-sm font-medium text-blue-900 mb-2">AI-Generated Answer:</h4>
+                                    <div className="text-sm text-gray-700 whitespace-pre-wrap">{generatedAnswer}</div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <p className="text-gray-500 text-sm">No questions generated</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-500">
+                    Parsed using {parsedData.ai_model_used} • {parsedData.created_at ? new Date(parsedData.created_at).toLocaleString() : 'Just now'}
+                  </div>
+                  <button
+                    onClick={() => setShowParsedData(false)}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

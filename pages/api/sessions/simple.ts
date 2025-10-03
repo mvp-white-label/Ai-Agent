@@ -45,7 +45,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       endsIn: session.status === 'active' ? `${session.duration_minutes}m` : 'Expired',
       aiUsage: session.ai_usage || 0,
       createdAt: session.created_at,
-      status: session.status
+      status: session.status,
+      session_type: session.session_type,
+      duration_minutes: session.duration_minutes,
+      started_at: session.started_at,
+      ended_at: session.ended_at
     }))
 
     return res.status(200).json({

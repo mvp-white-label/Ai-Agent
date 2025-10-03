@@ -8,7 +8,7 @@ interface ConnectModalProps {
   onConnect: (stream?: MediaStream, platform?: string) => void
   onBack: () => void
   onStartInterview: (stream: MediaStream, platform: string) => void
-  interviewData: {
+  interviewData?: {
     company: string
     position: string
     language: string
@@ -27,9 +27,22 @@ export default function ConnectModal({
   onStartInterview,
   interviewData 
 }: ConnectModalProps) {
-  const [language, setLanguage] = useState(interviewData.language)
-  const [simpleEnglish, setSimpleEnglish] = useState(interviewData.simpleEnglish)
-  const [aiModel, setAiModel] = useState(interviewData.aiModel)
+  // Provide default values if interviewData is not provided
+  const defaultInterviewData = {
+    company: 'General Interview',
+    position: 'Software Engineer',
+    language: 'English',
+    simpleEnglish: true,
+    aiModel: 'Gemini 2.0 Flash',
+    extraContext: '',
+    selectedResumeId: undefined
+  }
+  
+  const data = interviewData || defaultInterviewData
+  
+  const [language, setLanguage] = useState(data.language)
+  const [simpleEnglish, setSimpleEnglish] = useState(data.simpleEnglish)
+  const [aiModel, setAiModel] = useState(data.aiModel)
   const [isConnecting, setIsConnecting] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
   const [selectedTab, setSelectedTab] = useState<string>('')
@@ -211,7 +224,7 @@ export default function ConnectModal({
           {/* Interview Info */}
           <div className="mb-6">
             <p className="text-sm text-gray-700">
-              This is an Interview Session for a position <span className="font-semibold">"{interviewData.position}"</span> at <span className="font-semibold">"{interviewData.company}"</span> and <span className="text-blue-600 underline cursor-pointer">extra context</span>.
+              This is an Interview Session for a position <span className="font-semibold">"{data.position}"</span> at <span className="font-semibold">"{data.company}"</span> and <span className="text-blue-600 underline cursor-pointer">extra context</span>.
             </p>
           </div>
 
@@ -477,7 +490,7 @@ export default function ConnectModal({
                 <button
                   onClick={() => {
                     if (mediaStream) {
-                      onStartInterview(mediaStream, selectedTab)
+                      onConnect(mediaStream, selectedTab)
                     }
                   }}
                   className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"

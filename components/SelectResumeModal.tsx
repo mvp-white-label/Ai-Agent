@@ -49,6 +49,8 @@ export default function SelectResumeModal({
   const [interviewStream, setInterviewStream] = useState<MediaStream | null>(null)
   const [interviewPlatform, setInterviewPlatform] = useState<string>('')
   const [resumeData, setResumeData] = useState<string | undefined>(undefined)
+  const [sessionData, setSessionData] = useState<any>(null)
+  const [currentUserId, setCurrentUserId] = useState<string>('')
   const router = useRouter()
 
   // Load resumes when modal opens
@@ -111,12 +113,6 @@ export default function SelectResumeModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Store resume data and show connect modal
-    setResumeData(selectedResumeId || undefined)
-    setShowConnectModal(true)
-  }
-
-  const handleConnect = async (stream?: MediaStream, platform?: string) => {
     setIsLoading(true)
     
     try {
@@ -151,13 +147,13 @@ export default function SelectResumeModal({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          userId: validateData.user.id,
+          sessionToken: sessionToken, // Include session token for authentication
           company: interviewData?.company || 'Unknown Company',
           position: interviewData?.position || 'Unknown Position',
           language: interviewData?.language || 'English',
           aiModel: interviewData?.aiModel || 'Gemini 2.0 Flash',
           extraContext: interviewData?.extraContext || '',
-          resumeId: resumeData || null,
+          resumeId: selectedResumeId || null,
           sessionType: 'trial',
           durationMinutes: 10
         }),
@@ -170,16 +166,28 @@ export default function SelectResumeModal({
       const sessionData = await sessionResponse.json()
       console.log('Interview session created:', sessionData)
 
-      // Now start the interview interface with the stream
-      if (stream && platform) {
-        handleStartInterview(stream, platform)
-      } else {
-        console.log('No stream provided, cannot start interview interface')
-      }
+      // Store session data and user ID for passing to InterviewInterface
+      setSessionData(sessionData.session) // Store the actual session object, not the full response
+      setCurrentUserId(validateData.user.id)
+      
+      // Store resume data and show connect modal
+      setResumeData(selectedResumeId || undefined)
+      setShowConnectModal(true)
     } catch (error) {
       console.error('Error creating trial session:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleConnect = async (stream?: MediaStream, platform?: string) => {
+    // This function is called when screen sharing is successfully connected
+    if (stream && platform) {
+      console.log('Screen sharing stream received:', stream)
+      console.log('Platform detected:', platform)
+      handleStartInterview(stream, platform)
+    } else {
+      console.log('No stream or platform provided, cannot start interview interface')
     }
   }
 
@@ -194,18 +202,13 @@ export default function SelectResumeModal({
   const handleExitInterview = () => {
     console.log('Exiting interview and stopping screen sharing...')
     
+    // Additional cleanup to ensure stream is stopped
     if (interviewStream) {
-      // Stop all tracks (video and audio)
+      console.log('Parent: Additional stream cleanup...')
       interviewStream.getTracks().forEach(track => {
-        console.log('Stopping track:', track.kind, track.label)
+        console.log('Parent: Stopping track:', track.kind, track.label)
         track.stop()
       })
-      
-      // Clear the stream from video element if it exists
-      const videoElement = document.querySelector('video')
-      if (videoElement) {
-        videoElement.srcObject = null
-      }
     }
     
     // Reset all interview state
@@ -277,6 +280,8 @@ export default function SelectResumeModal({
             stream={interviewStream}
             platform={interviewPlatform}
             interviewData={interviewData}
+            sessionId={sessionData?.id}
+            userId={currentUserId}
             onExit={handleExitInterview}
           />
         )}
@@ -435,7 +440,7 @@ export default function SelectResumeModal({
           onClose={handleClose}
           onConnect={handleConnect}
           onBack={handleConnectBack}
-          onStartInterview={handleStartInterview}
+          onStartInterview={() => {}} // Not used - session creation happens in handleConnect
           interviewData={interviewData || {
             company: 'Unknown Company',
             position: 'Unknown Position',

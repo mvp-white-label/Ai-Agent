@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { UserService } from '../../../lib/supabaseClient'
+import { UserService, supabaseAdmin } from '../../../lib/supabaseClient'
 import { SignJWT } from 'jose'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -33,6 +33,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .setIssuedAt()
       .setExpirationTime('24h')
       .sign(secret)
+
+    // Try to allocate welcome bonus credits for new users
+    try {
+      const { data: userCredits } = await supabaseAdmin
+        .from('user_credits')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .single();
+
+      // If no credits record exists, this might be a new user - allocate welcome bonus
+      if (!userCredits) {
+        const { data: allocated } = await supabaseAdmin
+          .rpc('allocate_credits_by_rule', {
+            user_uuid: user.id,
+            rule_name_param: 'welcome_bonus'
+          });
+        
+        if (allocated) {
+          console.log('Login API - Welcome bonus credits allocated');
+        }
+      }
+    } catch (error) {
+      // Don't fail login if credit allocation fails
+      console.error('Error allocating welcome bonus credits:', error);
+    }
 
     // Return session token in response for localStorage storage
     console.log('Login API - User approved:', user.approved)

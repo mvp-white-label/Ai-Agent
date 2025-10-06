@@ -4,9 +4,9 @@
   "description": "Electron + React + Next.js app with Microsoft 365 authentication",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "next dev -p 3001",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node api.js && next dev -p 3001",
+    "build": "node api.js && next build",
+    "start": "node api.js && next start",
     "electron": "electron . --disable-gpu --disable-software-rasterizer",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3001 && electron . --disable-gpu --disable-software-rasterizer\" --kill-others-on-fail",
     "build-electron": "npm run build && electron-builder",

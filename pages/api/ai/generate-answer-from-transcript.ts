@@ -68,9 +68,9 @@ Format your response as a direct answer that could be used in the interview cont
         console.log('🎯 API - Quota exceeded, providing mock response for development')
         return res.status(200).json({
           success: true,
-          answer: `[Mock Response - Quota Exceeded] Based on the transcript "${transcript}", here's a suggested response: This is a great question about ${transcript.toLowerCase()}. I would recommend discussing your relevant experience and how it applies to this specific context.`,
-          transcript: transcript,
-          sessionId: sessionId,
+          answer: `[Mock Response - Quota Exceeded] Based on the transcript "${req.body.transcript}", here's a suggested response: This is a great question about ${req.body.transcript.toLowerCase()}. I would recommend discussing your relevant experience and how it applies to this specific context.`,
+          transcript: req.body.transcript,
+          sessionId: req.body.sessionId,
           timestamp: new Date().toISOString(),
           isMockResponse: true
         })

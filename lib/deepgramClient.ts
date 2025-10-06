@@ -272,11 +272,8 @@ export class DeepgramSTT {
             isFinal
           })
           
-          // Auto-generate AI answer for final transcriptions (interviewer questions)
-          if (isFinal && confidence > 0.7) {
-            console.log('🎯 Pareeket AI - Auto-generating answer for interviewer question:', transcript.trim())
-            this.generateAIAnswer(transcript.trim())
-          }
+          // Note: AI answer generation is handled by the InterviewInterface component
+          // This ensures proper state management and UI updates
         } else {
           console.log('🎯 Pareeket AI - No valid transcript found in data')
           // Debug: Log when we get empty transcripts
@@ -523,37 +520,6 @@ export class DeepgramSTT {
     return this.isConnected
   }
 
-  // Pareeket AI Style: Auto-generate AI answers
-  private async generateAIAnswer(question: string) {
-    try {
-      console.log('🎯 Pareeket AI - Generating answer for:', question)
-      
-      const response = await fetch('/api/ai/generate-answer-from-transcript', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          transcript: question,
-          context: 'Interview question from interviewer',
-          sessionId: 'pareeket-ai-session'
-        }),
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        console.log('🎯 Pareeket AI - Answer generated:', data.answer)
-        // You can emit this answer to the UI or store it
-        // For now, we'll just log it
-        console.log('🎯 Pareeket AI - Suggested Answer:', data.answer)
-      } else {
-        console.error('🎯 Pareeket AI - Error generating answer:', data.error)
-      }
-    } catch (error) {
-      console.error('🎯 Pareeket AI - Error generating answer:', error)
-    }
-  }
 }
 
 export default DeepgramSTT

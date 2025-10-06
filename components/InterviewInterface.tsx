@@ -535,36 +535,58 @@ export default function InterviewInterface({
   }
 
   const generateAIAnswer = async (text: string) => {
-    if (!text.trim()) return
+    if (!text.trim()) {
+      console.log('🎯 AI Answer - Empty text, skipping generation')
+      return
+    }
 
     try {
       setIsGeneratingAnswer(true)
-      console.log('Generating AI answer for:', text)
+      console.log('🎯 AI Answer - Starting generation for:', text)
+      console.log('🎯 AI Answer - Interview data:', interviewData)
+      console.log('🎯 AI Answer - Session ID:', sessionId)
+
+      const requestBody = {
+        transcript: text,
+        context: `Interview for ${interviewData.company} - ${interviewData.position}`,
+        sessionId: sessionId
+      }
+      
+      console.log('🎯 AI Answer - Request body:', requestBody)
 
       const response = await fetch('/api/ai/generate-answer-from-transcript', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          transcript: text,
-          context: `Interview for ${interviewData.company} - ${interviewData.position}`,
-          sessionId: sessionId
-        }),
+        body: JSON.stringify(requestBody),
       })
 
+      console.log('🎯 AI Answer - Response status:', response.status)
+      console.log('🎯 AI Answer - Response ok:', response.ok)
+
       const data = await response.json()
+      console.log('🎯 AI Answer - Response data:', data)
 
       if (data.success) {
-        setAiAnswer(data.answer)
-        console.log('AI answer generated:', data.answer)
+        if (data.isMockResponse) {
+          setAiAnswer(data.answer + ' (Mock response - quota exceeded)')
+          console.log('🎯 AI Answer - Mock response generated:', data.answer)
+        } else {
+          setAiAnswer(data.answer)
+          console.log('🎯 AI Answer - Successfully generated:', data.answer)
+        }
       } else {
-        console.error('Error generating AI answer:', data.error)
-        setAiAnswer('Error generating AI response')
+        console.error('🎯 AI Answer - Error in response:', data.error)
+        if (data.quotaExceeded) {
+          setAiAnswer('⚠️ AI quota exceeded. You have reached the daily limit for AI requests. Please try again tomorrow or upgrade your plan.')
+        } else {
+          setAiAnswer('Error generating AI response: ' + (data.error || 'Unknown error'))
+        }
       }
     } catch (error) {
-      console.error('Error generating AI answer:', error)
-      setAiAnswer('Error generating AI response')
+      console.error('🎯 AI Answer - Fetch error:', error)
+      setAiAnswer('Error generating AI response: ' + (error instanceof Error ? error.message : 'Unknown error'))
     } finally {
       setIsGeneratingAnswer(false)
     }

@@ -489,8 +489,7 @@ export default function InterviewInterface({
           
           if (result.isFinal) {
             console.log('InterviewInterface - Final transcription:', result.text)
-            // Auto-generate AI answer for final transcriptions
-            generateAIAnswer(result.text)
+            // Transcription is complete - user can now manually generate AI answer if desired
           }
         },
         (error: Error) => {
@@ -1148,12 +1147,17 @@ export default function InterviewInterface({
             )}
 
             {/* Manual AI Answer Button */}
-            {transcribedText && !isGeneratingAnswer && (
+            {transcribedText && (
               <button
                 onClick={() => generateAIAnswer(transcribedText)}
-                className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                disabled={isGeneratingAnswer}
+                className={`w-full px-3 py-2 text-white text-xs rounded transition-colors ${
+                  isGeneratingAnswer 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                Generate AI Answer
+                {isGeneratingAnswer ? 'Generating...' : 'Generate AI Answer'}
               </button>
             )}
           </div>

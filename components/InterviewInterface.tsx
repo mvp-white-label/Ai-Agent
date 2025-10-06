@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import DeepgramSTT, { TranscriptionResult } from '../lib/deepgramClient'
 
 interface InterviewInterfaceProps {
   stream: MediaStream
@@ -27,7 +28,6 @@ export default function InterviewInterface({
   userId,
   onExit 
 }: InterviewInterfaceProps) {
-  const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState<string>('')
   const [messages, setMessages] = useState<Array<{id: string, type: 'user' | 'ai', content: string, timestamp: Date}>>([])
   const [manualMessage, setManualMessage] = useState('')
@@ -39,18 +39,51 @@ export default function InterviewInterface({
     answer: string[]
     timestamp: Date
   } | null>(null)
-  const [isScreenDisconnected, setIsScreenDisconnected] = useState(false)
   const [showReconnectModal, setShowReconnectModal] = useState(false)
   const [isVideoLoading, setIsVideoLoading] = useState(true)
   const [showStopSharingOptions, setShowStopSharingOptions] = useState(false)
   const [isExiting, setIsExiting] = useState(false)
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null)
+  
+  // Voice detection states
+  const [isVoiceDetectionActive, setIsVoiceDetectionActive] = useState(false)
+  const [transcribedText, setTranscribedText] = useState<string>('')
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [transcriptionConfidence, setTranscriptionConfidence] = useState<number>(0)
+  const [aiAnswer, setAiAnswer] = useState<string>('')
+  const [isGeneratingAnswer, setIsGeneratingAnswer] = useState(false)
+  const [pareeketAnswers, setPareeketAnswers] = useState<Array<{question: string, answer: string, timestamp: Date}>>([])
+  
+  // Deepgram STT instance
+  const deepgramSTTRef = useRef<DeepgramSTT | null>(null)
+
+  // Debug logging for state changes
+  console.log('InterviewInterface render - stream:', !!stream, 'isVideoLoading:', isVideoLoading)
+  console.log('SessionId:', sessionId, 'UserId:', userId)
+  console.log('Stream details:', stream ? {
+    active: stream.active,
+    id: stream.id,
+    tracks: stream.getTracks().length,
+    trackStates: stream.getTracks().map(t => ({ kind: t.kind, readyState: t.readyState, enabled: t.enabled }))
+  } : 'No stream')
+  
+  // Immediate check for stream status on render
+  useEffect(() => {
+    if (stream && stream.active) {
+      console.log('Immediate stream check - stream is active')
+      setIsVideoLoading(false)
+    } else if (stream) {
+      console.log('Immediate stream check - stream exists but not active:', stream.active)
+    } else {
+      console.log('Immediate stream check - no stream provided')
+    }
+  }, [])
+
   const [currentDuration, setCurrentDuration] = useState(0)
   const [currentDurationSeconds, setCurrentDurationSeconds] = useState(0)
   
   const videoRef = useRef<HTMLVideoElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
   const stopSharingRef = useRef<HTMLDivElement>(null)
 
   // Handle click outside to close stop sharing options
@@ -223,7 +256,6 @@ export default function InterviewInterface({
       if (endVideoTrack) {
         endVideoTrack.addEventListener('ended', () => {
           console.log('Screen sharing ended by user')
-          setIsScreenDisconnected(true)
           setShowReconnectModal(true)
         })
       }
@@ -236,9 +268,13 @@ export default function InterviewInterface({
       // Set session status to active when interview starts
       if (sessionId && userId) {
         console.log('Interview started - setting session status to active')
+        console.log('SessionId:', sessionId, 'UserId:', userId)
         const startTime = new Date()
         setSessionStartTime(startTime)
         updateSessionStatus('active', 0) // Initialize AI usage to 0 and set started_at
+      } else {
+        console.log('Cannot update session status - missing sessionId or userId')
+        console.log('SessionId:', sessionId, 'UserId:', userId)
       }
     } else {
       console.log('Video stream not available:', { videoRef: !!videoRef.current, stream: !!stream })
@@ -302,56 +338,238 @@ export default function InterviewInterface({
     }
   }, [sessionStartTime])
 
-  // Initialize speech recognition
+
+
+  // Handle screen sharing stream changes - simplified for Deepgram focus
   useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      recognitionRef.current = new SpeechRecognition()
+    console.log('InterviewInterface: Stream changed:', stream)
+    if (stream) {
+      console.log('Stream active status:', stream.active)
+      console.log('Stream tracks:', stream.getTracks().map(track => ({
+        kind: track.kind,
+        enabled: track.enabled,
+        readyState: track.readyState
+      })))
       
-      recognitionRef.current.continuous = true
-      recognitionRef.current.interimResults = true
-      recognitionRef.current.lang = interviewData.language === 'English' ? 'en-US' : 'en-US'
-
-      recognitionRef.current.onresult = (event) => {
-        let finalTranscript = ''
-        let interimTranscript = ''
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript
-          } else {
-            interimTranscript += transcript
-          }
+      // For Deepgram, we only need audio tracks to exist - don't check readyState
+      // Sometimes tracks appear ended but still work for voice detection
+      const hasAudioTracks = stream.getAudioTracks().length > 0
+      
+      console.log('Stream is active:', stream.active, 'Has audio tracks:', hasAudioTracks)
+      
+      console.log('Audio track details:', stream.getAudioTracks().map(track => ({
+        kind: track.kind,
+        enabled: track.enabled,
+        readyState: track.readyState,
+        muted: track.muted
+      })))
+      
+      if (hasAudioTracks) {
+        console.log('🎯 Stream has audio tracks - voice detection available')
+        setIsVideoLoading(false)
+        // Note: Voice detection is now manual only - user must click the button to start
+      } else {
+        console.log('InterviewInterface: No audio tracks - stopping voice detection')
+        // Stop voice detection if it's running
+        if (isVoiceDetectionActive) {
+          stopVoiceDetection()
         }
-
-        setTranscript(prev => prev + finalTranscript + interimTranscript)
+        setIsVideoLoading(false)
       }
-
-      recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event.error)
-        setIsListening(false)
-      }
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false)
+    } else {
+      console.log('InterviewInterface: No stream - stopping voice detection')
+      // Stop voice detection if it's running
+      if (isVoiceDetectionActive) {
+        stopVoiceDetection()
       }
     }
-  }, [interviewData.language])
+  }, [stream])
 
-  const startListening = () => {
-    if (recognitionRef.current && !isListening) {
-      recognitionRef.current.start()
-      setIsListening(true)
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Cleanup voice detection
+      if (deepgramSTTRef.current) {
+        deepgramSTTRef.current.stopTranscription()
+      }
+    }
+  }, [])
+
+
+  // Voice detection functions
+  const startVoiceDetection = async () => {
+    console.log('🎤 START VOICE DETECTION CALLED')
+    try {
+      if (!stream) {
+        console.error('No stream available for voice detection')
+        alert('No screen sharing stream available. Please start screen sharing first.')
+        return
+      }
+
+      // Check if stream has audio tracks (for Deepgram voice detection)
+      const hasAudioTracks = stream.getAudioTracks().length > 0
+      const hasEnabledAudioTracks = stream.getAudioTracks().some(track => track.enabled && !track.muted)
+      const hasLiveAudioTracks = stream.getAudioTracks().some(track => track.readyState === 'live')
+      
+      console.log('Stream active:', stream.active, 'Has audio tracks:', hasAudioTracks, 'Has enabled audio tracks:', hasEnabledAudioTracks, 'Has live audio tracks:', hasLiveAudioTracks)
+      console.log('Audio track details:', stream.getAudioTracks().map(track => ({
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+        label: track.label
+      })))
+      
+      // For Deepgram, we only need audio tracks to exist - don't check if they're enabled/muted
+      // Sometimes tracks appear disabled but still work for voice detection
+      if (!hasAudioTracks) {
+        console.error('No audio tracks available for voice detection')
+        alert('No audio tracks found in screen sharing. Please restart screen sharing with audio enabled to use voice detection.')
+        return
+      }
+      
+      // For screen sharing, even "ended" tracks can sometimes work with Deepgram
+      // Only block if there are absolutely no audio tracks
+      if (!hasAudioTracks) {
+        console.error('No audio tracks at all - screen sharing session has ended')
+        alert('Screen sharing session has ended. Please restart screen sharing to use voice detection.')
+        return
+      }
+      
+      console.log('Audio tracks exist (even if ended) - proceeding with voice detection for screen sharing')
+      
+      console.log('Proceeding with voice detection for screen sharing - attempting to use ended tracks')
+
+      // Check if stream has audio tracks
+      const audioTracks = stream.getAudioTracks()
+      console.log('Audio tracks found:', audioTracks.length)
+      console.log('Audio track details:', audioTracks.map(track => ({
+        id: track.id,
+        kind: track.kind,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+        settings: track.getSettings()
+      })))
+
+      if (audioTracks.length === 0) {
+        console.error('No audio tracks in stream')
+        alert('No audio detected in screen sharing. Please enable audio when sharing your screen.')
+        return
+      }
+
+      // For screen sharing, proceed even with ended tracks - Deepgram might still work
+      console.log('Attempting voice detection with current audio tracks (even if ended)')
+      console.log('All audio track states:', audioTracks.map(track => ({
+        readyState: track.readyState,
+        muted: track.muted,
+        enabled: track.enabled
+      })))
+
+      console.log('Starting voice detection...')
+      
+      // Show warning if tracks are ended
+      const hasEndedTracks = audioTracks.some(track => track.readyState === 'ended')
+      if (hasEndedTracks) {
+        console.warn('⚠️ Audio tracks appear ended but attempting voice detection anyway')
+      }
+
+      // Initialize Deepgram STT
+      if (!deepgramSTTRef.current) {
+        deepgramSTTRef.current = new DeepgramSTT()
+      }
+
+      // Start transcription first, then set state only if successful
+      await deepgramSTTRef.current.startTranscription(
+        stream,
+        (result: TranscriptionResult) => {
+          console.log('InterviewInterface - Transcription result received:', result)
+          console.log('InterviewInterface - Setting transcribed text:', result.text)
+          setTranscribedText(result.text)
+          setTranscriptionConfidence(result.confidence)
+          
+          if (result.isFinal) {
+            console.log('InterviewInterface - Final transcription:', result.text)
+            // Auto-generate AI answer for final transcriptions
+            generateAIAnswer(result.text)
+          }
+        },
+        (error: Error) => {
+          console.error('InterviewInterface - Transcription error:', error)
+          setIsVoiceDetectionActive(false)
+          setIsTranscribing(false)
+          alert('Voice detection error: ' + error.message)
+        }
+      )
+
+      // Only set state to active after successful transcription start
+      console.log('Voice detection started successfully')
+      setIsVoiceDetectionActive(true)
+      setIsTranscribing(true)
+
+    } catch (error) {
+      console.error('Error starting voice detection:', error)
+      setIsVoiceDetectionActive(false)
+      setIsTranscribing(false)
+      alert('Failed to start voice detection: ' + (error as Error).message)
     }
   }
 
-  const stopListening = () => {
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop()
-      setIsListening(false)
+  const stopVoiceDetection = () => {
+    console.log('🎤 STOPPING voice detection...')
+    console.log('🎤 Before stop - isVoiceDetectionActive:', isVoiceDetectionActive)
+    
+    // Stop Deepgram transcription first
+    if (deepgramSTTRef.current) {
+      console.log('🎤 Stopping Deepgram transcription')
+      deepgramSTTRef.current.stopTranscription()
+    }
+    
+    // Reset all voice detection states
+    console.log('🎤 Resetting voice detection states')
+    setIsVoiceDetectionActive(false)
+    setIsTranscribing(false)
+    setTranscribedText('')
+    setTranscriptionConfidence(0)
+    
+    console.log('🎤 Voice detection stopped successfully - isVoiceDetectionActive should now be false')
+  }
+
+  const generateAIAnswer = async (text: string) => {
+    if (!text.trim()) return
+
+    try {
+      setIsGeneratingAnswer(true)
+      console.log('Generating AI answer for:', text)
+
+      const response = await fetch('/api/ai/generate-answer-from-transcript', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transcript: text,
+          context: `Interview for ${interviewData.company} - ${interviewData.position}`,
+          sessionId: sessionId
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setAiAnswer(data.answer)
+        console.log('AI answer generated:', data.answer)
+      } else {
+        console.error('Error generating AI answer:', data.error)
+        setAiAnswer('Error generating AI response')
+      }
+    } catch (error) {
+      console.error('Error generating AI answer:', error)
+      setAiAnswer('Error generating AI response')
+    } finally {
+      setIsGeneratingAnswer(false)
     }
   }
+
 
   const clearTranscript = () => {
     setTranscript('')
@@ -400,13 +618,16 @@ export default function InterviewInterface({
 
   // Function to update session status
   const updateSessionStatus = async (status: string, aiUsage?: number) => {
+    console.log('updateSessionStatus called with:', { sessionId, userId, status, aiUsage })
+    
     if (!sessionId || !userId) {
       console.log('Missing sessionId or userId - cannot update session status')
+      console.log('sessionId:', sessionId, 'userId:', userId)
       return
     }
 
     try {
-      console.log('Updating session status:', { sessionId, userId, status, aiUsage })
+      console.log('Making API call to update session status...')
       
       const response = await fetch('/api/sessions/update-status', {
         method: 'POST',
@@ -564,12 +785,10 @@ export default function InterviewInterface({
       if (videoTrack) {
         videoTrack.addEventListener('ended', () => {
           console.log('Screen sharing ended again')
-          setIsScreenDisconnected(true)
           setShowReconnectModal(true)
         })
       }
 
-      setIsScreenDisconnected(false)
       setShowReconnectModal(false)
       
       // Auto-analyze new screen
@@ -605,8 +824,10 @@ export default function InterviewInterface({
       console.log('🚨 NO VIDEO REF FOUND!')
     }
     
-    // Stop speech recognition
-    stopListening()
+    // Stop voice detection
+    if (isVoiceDetectionActive) {
+      stopVoiceDetection()
+    }
     
     // Stop screen sharing if stream exists - IMMEDIATELY
     if (stream) {
@@ -671,6 +892,83 @@ export default function InterviewInterface({
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-sm font-medium text-gray-700">Screen Share</h3>
             <div className="flex space-x-2">
+              {/* Voice Detection Toggle */}
+        <button
+          onClick={async (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            console.log('🎤 VOICE BUTTON CLICKED - Current state:', {
+              isVoiceDetectionActive,
+              isTranscribing,
+              hasStream: !!stream,
+              hasAudioTracks: stream?.getAudioTracks().length || 0
+            })
+            
+            // Prevent multiple rapid clicks
+            if (isTranscribing) {
+              console.log('🎤 Voice detection already starting, ignoring click')
+              return
+            }
+            
+            if (isVoiceDetectionActive) {
+              console.log('🎤 TURNING OFF voice detection')
+              stopVoiceDetection()
+            } else {
+              console.log('🎤 TURNING ON voice detection')
+              try {
+                await startVoiceDetection()
+                console.log('🎤 Voice detection started successfully')
+              } catch (error) {
+                console.error('🎤 Error starting voice detection:', error)
+                // State will be reset in the catch block of startVoiceDetection
+              }
+            }
+          }}
+          className={`px-3 py-1 text-xs rounded ${
+            isVoiceDetectionActive 
+              ? 'bg-green-100 hover:bg-green-200 text-green-700' 
+              : isTranscribing
+                ? 'bg-yellow-100 text-yellow-700 cursor-wait'
+                : stream && stream.getAudioTracks().length > 0
+                  ? 'bg-blue-100 hover:bg-blue-200 text-blue-700'
+                  : 'bg-red-100 text-red-500 cursor-not-allowed'
+          }`}
+          title={
+            isVoiceDetectionActive 
+              ? 'Stop Voice Detection' 
+              : stream && stream.getAudioTracks().length > 0
+                ? 'Start Voice Detection'
+                : 'Screen sharing session ended - restart to use voice detection'
+          }
+          disabled={!stream || stream.getAudioTracks().length === 0 || isTranscribing}
+        >
+          {isVoiceDetectionActive ? '🎤 Voice ON' : isTranscribing ? '🎤 Starting...' : '🎤 Voice OFF'}
+        </button>
+        
+        {/* Debug button to force voice detection */}
+        {stream && stream.getAudioTracks().length > 0 && (
+          <button
+            onClick={() => {
+              console.log('DEBUG: Force starting voice detection')
+              console.log('Stream details:', {
+                active: stream.active,
+                tracks: stream.getTracks().length,
+                audioTracks: stream.getAudioTracks().length,
+                trackStates: stream.getAudioTracks().map(track => ({
+                  readyState: track.readyState,
+                  enabled: track.enabled,
+                  muted: track.muted
+                }))
+              })
+              startVoiceDetection()
+            }}
+            className="px-2 py-1 text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded ml-1"
+            title="Debug: Force start voice detection"
+          >
+            🔧 Debug
+          </button>
+        )}
+              
               <div className="relative" ref={stopSharingRef}>
                 <button 
                   onClick={() => setShowStopSharingOptions(!showStopSharingOptions)}
@@ -687,7 +985,6 @@ export default function InterviewInterface({
                         // Stop current stream and show reconnect modal
                         if (stream) {
                           stream.getTracks().forEach(track => track.stop())
-                          setIsScreenDisconnected(true)
                           setShowReconnectModal(true)
                         }
                       }}
@@ -749,33 +1046,96 @@ export default function InterviewInterface({
                 </div>
               </div>
             )}
-            {!isExiting && (!stream || isScreenDisconnected) && (
-              <div className="absolute inset-0 flex items-center justify-center text-white">
-                <div className="text-center">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-2 mx-auto ${
-                    isScreenDisconnected ? 'bg-yellow-600' : 'bg-gray-600'
-                  }`}>
-                    <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <p className="text-sm">
-                    {isScreenDisconnected ? 'Screen sharing disconnected' : 'Waiting for screen share...'}
-                  </p>
-                </div>
-              </div>
-            )}
             
-            {stream && !isScreenDisconnected && isVideoLoading && (
+            {stream && isVideoLoading && (
               <div className="absolute inset-0 flex items-center justify-center text-white bg-black bg-opacity-50">
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-2 mx-auto"></div>
                   <p className="text-sm">Loading screen share...</p>
+                  </div>
+                </div>
+            )}
+              </div>
+        </div>
+
+        {/* Voice Detection Section */}
+        {isVoiceDetectionActive && (
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Voice Detection</h4>
+            
+            {/* Transcription Status */}
+            <div className="mb-3">
+              <div className="flex items-center space-x-2 mb-2">
+                <div className={`w-2 h-2 rounded-full ${isTranscribing ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                <span className="text-xs text-gray-600">
+                  {isTranscribing ? 'Listening...' : 'Voice detection active'}
+                </span>
+                {transcriptionConfidence > 0 && (
+                  <span className="text-xs text-gray-500">
+                    (Confidence: {Math.round(transcriptionConfidence * 100)}%)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Transcribed Text */}
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Transcribed Text:</label>
+              <div className="bg-white p-2 rounded border text-sm text-gray-800 min-h-[60px] max-h-[120px] overflow-y-auto">
+                {transcribedText || (isTranscribing ? 'Listening for speech...' : 'No speech detected yet')}
                 </div>
               </div>
+
+            {/* AI Answer */}
+            {aiAnswer && (
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">AI Response:</label>
+                <div className="bg-blue-50 p-2 rounded border text-sm text-gray-800 min-h-[60px] max-h-[120px] overflow-y-auto">
+                  {isGeneratingAnswer ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                      <span>Generating AI response...</span>
+                    </div>
+                  ) : (
+                    aiAnswer
             )}
           </div>
         </div>
+            )}
+
+            {/* Pareeket AI Style Answers */}
+            {pareeketAnswers.length > 0 && (
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">🎯 Pareeket AI - Interviewer Questions & Answers:</label>
+                <div className="bg-green-50 p-2 rounded border text-sm text-gray-800 max-h-[200px] overflow-y-auto">
+                  {pareeketAnswers.map((item, index) => (
+                    <div key={index} className="mb-3 p-2 bg-white rounded border-l-4 border-green-500">
+                      <div className="text-xs text-gray-500 mb-1">
+                        {item.timestamp.toLocaleTimeString()}
+                      </div>
+                      <div className="font-medium text-gray-700 mb-1">
+                        <strong>Q:</strong> {item.question}
+                      </div>
+                      <div className="text-gray-600">
+                        <strong>A:</strong> {item.answer}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Manual AI Answer Button */}
+            {transcribedText && !isGeneratingAnswer && (
+              <button
+                onClick={() => generateAIAnswer(transcribedText)}
+                className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+              >
+                Generate AI Answer
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Transcript Section */}
         <div className="flex-1 p-4 flex flex-col">
@@ -795,12 +1155,11 @@ export default function InterviewInterface({
           
           <div className="flex space-x-2 mb-3">
             <button
-              onClick={isListening ? stopListening : startListening}
-              className={`flex-1 px-3 py-2 text-sm rounded-md flex items-center justify-center space-x-2 ${
-                isListening 
-                  ? 'bg-red-100 text-red-700 hover:bg-red-200' 
-                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-              }`}
+              onClick={() => {
+                // This is the Connect button - it should start screen sharing
+                console.log('Connect button clicked - this should start screen sharing')
+              }}
+              className="flex-1 px-3 py-2 text-sm rounded-md flex items-center justify-center space-x-2 bg-blue-100 text-blue-700 hover:bg-blue-200"
             >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />

@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Initialize Gemini AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const genAI = new GoogleGenerativeAI(process.env.Gemini_API_KEY!);
 
 export const geminiModel = genAI.getGenerativeModel({ 
   model: "gemini-2.0-flash-exp" // Using Gemini 2.0 Flash Experimental (for 2.5 Flash)

@@ -51,6 +51,15 @@ export default function SelectResumeModal({
   const [resumeData, setResumeData] = useState<string | undefined>(undefined)
   const [sessionData, setSessionData] = useState<any>(null)
   const [currentUserId, setCurrentUserId] = useState<string>('')
+  const [currentInterviewData, setCurrentInterviewData] = useState<{
+    company: string
+    position: string
+    language: string
+    simpleEnglish: boolean
+    aiModel: string
+    extraContext?: string
+    selectedResumeId?: string
+  } | null>(null)
   const router = useRouter()
 
   // Load resumes when modal opens
@@ -79,7 +88,12 @@ export default function SelectResumeModal({
       // Listen for focus events to refresh when user returns to the tab
       const handleFocus = () => {
         console.log('Window focused, refreshing resume list...')
-        loadResumes()
+        // Don't load resumes if interview interface is active
+        if (!showInterviewInterface) {
+          loadResumes()
+        } else {
+          console.log('Interview interface is active, skipping resume refresh')
+        }
       }
       
       window.addEventListener('focus', handleFocus)
@@ -88,7 +102,7 @@ export default function SelectResumeModal({
         window.removeEventListener('focus', handleFocus)
       }
     }
-  }, [isOpen, userId])
+  }, [isOpen, userId, showInterviewInterface])
 
   const loadResumes = async () => {
     if (!userId) return
@@ -169,6 +183,17 @@ export default function SelectResumeModal({
       // Store session data and user ID for passing to InterviewInterface
       setSessionData(sessionData.session) // Store the actual session object, not the full response
       setCurrentUserId(validateData.user.id)
+      
+      // Set interview data for the interview interface
+      setCurrentInterviewData({
+        company: interviewData?.company || 'Unknown Company',
+        position: interviewData?.position || 'Unknown Position',
+        language: interviewData?.language || 'English',
+        simpleEnglish: true,
+        aiModel: interviewData?.aiModel || 'Gemini 2.0 Flash',
+        extraContext: interviewData?.extraContext || '',
+        selectedResumeId: selectedResumeId || undefined
+      })
       
       // Store resume data and show connect modal
       setResumeData(selectedResumeId || undefined)
@@ -275,17 +300,31 @@ export default function SelectResumeModal({
     return (
       <>
         {/* Interview Interface */}
-        {interviewStream && interviewData && (
+        {interviewStream && currentInterviewData && (
           <InterviewInterface
             stream={interviewStream}
             platform={interviewPlatform}
-            interviewData={interviewData}
+            interviewData={currentInterviewData}
             sessionId={sessionData?.id}
             userId={currentUserId}
             onExit={handleExitInterview}
           />
         )}
       </>
+    )
+  }
+
+  // If connect modal is showing, render it
+  if (showConnectModal) {
+    return (
+      <ConnectModal
+        isOpen={showConnectModal}
+        onClose={() => setShowConnectModal(false)}
+        onBack={() => setShowConnectModal(false)}
+        onStartInterview={handleStartInterview}
+        onConnect={handleConnect}
+        interviewData={interviewData}
+      />
     )
   }
 

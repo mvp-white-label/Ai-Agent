@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import ConnectModal from './ConnectModal'
 import InterviewInterface from './InterviewInterface'
 import OutOfCreditsModal from './OutOfCreditsModal'
@@ -28,6 +29,7 @@ export default function ReadyToCreateModal({
   onBack,
   interviewData 
 }: ReadyToCreateModalProps) {
+  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [showConnectModal, setShowConnectModal] = useState(false)
   const [showInterviewInterface, setShowInterviewInterface] = useState(false)
